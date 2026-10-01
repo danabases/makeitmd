@@ -1,0 +1,7 @@
+PyMuPDF
+pymupdf4llm
+python-docx
+openpyxl
+Pillow
+pillow-heif
+pywin32; sys_platform == "win32"
