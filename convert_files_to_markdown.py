@@ -384,8 +384,13 @@ def pdf_to_markdown(path: Path) -> str:
     # Tesseract; without this, pymupdf4llm runs its own internal OCR pass first
     # (printing "OCR on page.number=..." for every low-text page) whose output is
     # discarded, doubling OCR work for no benefit.
+<<<<<<< HEAD
     # ignore_code=True: PDFs typeset in a monospaced font are otherwise treated
     # as code blocks, which drops the spaces between words.
+=======
+    # ignore_code=True: PDFs typeset in a monospaced font (e.g. Courier statutes)
+    # are otherwise treated as code blocks, which drops the spaces between words.
+>>>>>>> 925847a7ec63044c6edcf3321071a67c96b6e485
     markdown_pages = pymupdf4llm.to_markdown(
         str(path), page_chunks=True, use_ocr=False, ignore_code=True
     )
