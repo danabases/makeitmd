@@ -384,11 +384,16 @@ def pdf_to_markdown(path: Path) -> str:
     # Tesseract; without this, pymupdf4llm runs its own internal OCR pass first
     # (printing "OCR on page.number=..." for every low-text page) whose output is
     # discarded, doubling OCR work for no benefit.
-    markdown_pages = pymupdf4llm.to_markdown(str(path), page_chunks=True, use_ocr=False)
+    # ignore_code=True: PDFs typeset in a monospaced font are otherwise treated
+    # as code blocks, which drops the spaces between words.
+    markdown_pages = pymupdf4llm.to_markdown(
+        str(path), page_chunks=True, use_ocr=False, ignore_code=True
+    )
     for index, page in enumerate(doc):
         embedded_text = page.get_text("text").strip()
         if len(embedded_text) >= OCR_TEXT_THRESHOLD:
-            markdown_text = markdown_pages[index]["text"].strip()
+            # Monospaced runs still come back wrapped in inline backticks.
+            markdown_text = markdown_pages[index]["text"].replace("`", "").strip()
             if len(markdown_text) < len(embedded_text) * 0.6:
                 chunks.append(embedded_text)
             else:
