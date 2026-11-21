@@ -69,6 +69,92 @@ class ConverterTests(unittest.TestCase):
         self.run_converter()
         self.assertEqual(destination.read_text(encoding="utf-8"), "second\n")
 
+    def test_local_markdown_folders_and_incremental_refresh(self) -> None:
+        nested = self.source / "project" / "notes"
+        nested.mkdir(parents=True)
+        sources = [self.source / "root.txt", nested.parent / "report.txt", nested / "note.txt"]
+        for source in sources:
+            source.write_text("first", encoding="utf-8")
+        original = nested / "existing.MD"
+        original.write_text("keep me", encoding="utf-8")
+        generated = nested / "markdown"
+        generated.mkdir()
+        (generated / "ignored.txt").write_text("ignore me", encoding="utf-8")
+
+        def run_local(*options: str) -> None:
+            with (
+                mock.patch.object(sys, "argv", ["converter.py", str(self.source), *options]),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                converter.main()
+
+        run_local()
+        destinations = [source.parent / "markdown" / (source.name + ".md") for source in sources]
+        for destination in destinations:
+            self.assertEqual(destination.read_text(encoding="utf-8"), "first\n")
+        unchanged_time = destinations[0].stat().st_mtime_ns
+        sources[1].write_text("updated", encoding="utf-8")
+        newer = destinations[1].stat().st_mtime + 5
+        os.utime(sources[1], (newer, newer))
+        (nested / "new.txt").write_text("new", encoding="utf-8")
+        run_local()
+        self.assertEqual(destinations[0].stat().st_mtime_ns, unchanged_time)
+        self.assertEqual(destinations[1].read_text(encoding="utf-8"), "updated\n")
+        self.assertEqual((generated / "new.txt.md").read_text(encoding="utf-8"), "new\n")
+        self.assertEqual(original.read_text(encoding="utf-8"), "keep me")
+        self.assertFalse((generated / "markdown").exists())
+        self.assertFalse((generated / "existing.MD.md").exists())
+
+    def test_top_scan_excludes_nested_and_generated_files(self) -> None:
+        (self.source / "root.txt").write_text("root", encoding="utf-8")
+        for name in ("nested", "MARKDOWN"):
+            folder = self.source / name
+            folder.mkdir()
+            (folder / "ignore.txt").write_text("ignore", encoding="utf-8")
+        self.assertEqual(
+            converter.iter_source_files(self.source, None, False),
+            [self.source / "root.txt"],
+        )
+        self.assertEqual(
+            converter.iter_source_files(self.source, None, True),
+            [self.source / "nested" / "ignore.txt", self.source / "root.txt"],
+        )
+
+    def test_repository_exclusions_at_every_depth(self) -> None:
+        nested = self.source / "project"
+        nested.mkdir()
+        allowed = nested / "project-document.txt"
+        allowed.write_text("keep", encoding="utf-8")
+        for parent in (self.source, nested):
+            for name in converter.EXCLUDED_DIRECTORY_NAMES:
+                folder = parent / name.upper() / "nested"
+                folder.mkdir(parents=True)
+                (folder / "ignored.txt").write_text("ignore", encoding="utf-8")
+
+        self.assertEqual(
+            converter.iter_source_files(self.source, None, True), [allowed]
+        )
+        self.assertEqual(
+            converter.resolve_single_file(self.source, "project-document.txt", True), allowed
+        )
+        with self.assertRaises(FileNotFoundError):
+            converter.resolve_single_file(self.source, "ignored.txt", True)
+        for name in (".git", ".codex", ".agents"):
+            path = self.source / name.upper() / "nested" / "ignored.txt"
+            for requested in (str(path), str(path.relative_to(self.source))):
+                with self.assertRaisesRegex(ValueError, "excluded directory"):
+                    converter.resolve_single_file(self.source, requested, True)
+
+    def test_custom_output_folder_is_pruned(self) -> None:
+        output = self.source / "generated"
+        output.mkdir()
+        (output / "ignored.txt").write_text("ignore", encoding="utf-8")
+        allowed = self.source / "source.txt"
+        allowed.write_text("keep", encoding="utf-8")
+        self.assertEqual(
+            converter.iter_source_files(self.source, output, True), [allowed]
+        )
+
     def test_mixed_images_do_not_move_sources_or_keep_temp_png(self) -> None:
         for name in ("photo.jpg", "photo.png", "photo.heic"):
             (self.source / name).write_bytes(b"sample")

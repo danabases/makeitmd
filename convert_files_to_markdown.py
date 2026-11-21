@@ -27,9 +27,17 @@ fitz.TOOLS.mupdf_display_errors(False)
 
 
 # User configuration. Command-line arguments can override these values.
-# By default, Markdown is written beside each source file. Pass --o to write
+# By default, Markdown is written in each source directory's markdown folder. Pass --o to write
 # into a separate folder. The source folder is a required positional argument.
 SCAN_SUBFOLDERS = True
+MARKDOWN_FOLDER = "markdown"
+# Directory names are matched case insensitively at every depth. Keep build/
+# and dist/ opt-in: some projects store source documents in those folders.
+EXCLUDED_DIRECTORY_NAMES = {
+    MARKDOWN_FOLDER, ".git", ".codex", ".agents", ".hg", ".svn",
+    ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", ".tox", ".nox",
+}
 SINGLE_FILE: str | None = None
 # Regenerate a Markdown file when its source is newer than the existing
 # Markdown (e.g. after a conversion fix). Files whose Markdown is already
@@ -70,11 +78,21 @@ def markdown_filename(path: Path) -> str:
     return f"{path.name}.md"
 
 
+def validate_source_location(path: Path, source_dir: Path) -> Path:
+    try:
+        relative_parent = path.resolve().parent.relative_to(source_dir.resolve())
+    except ValueError:
+        return path
+    if any(part.lower() in EXCLUDED_DIRECTORY_NAMES for part in relative_parent.parts):
+        raise ValueError(f"Source file is inside an excluded directory: {path}")
+    return path
+
+
 def resolve_single_file(source_dir: Path, file_name: str, scan_subfolders: bool) -> Path:
     candidate = Path(file_name)
     if candidate.is_absolute():
         if candidate.is_file():
-            return candidate
+            return validate_source_location(candidate, source_dir)
         raise FileNotFoundError(f"Could not find {file_name!r}")
 
     source_candidate = source_dir / candidate
@@ -88,17 +106,16 @@ def resolve_single_file(source_dir: Path, file_name: str, scan_subfolders: bool)
                 "the working directory. Use an absolute path."
             )
     if source_exists:
-        return source_candidate
+        return validate_source_location(source_candidate, source_dir)
     if working_exists:
-        return working_candidate
+        return validate_source_location(working_candidate, source_dir)
 
     if candidate.name != file_name:
         raise FileNotFoundError(f"Could not find {file_name!r} under {source_dir} or the working directory")
 
-    pattern = "**/*" if scan_subfolders else "*"
     matches = [
         path
-        for path in source_dir.glob(pattern)
+        for path in iter_source_files(source_dir, None, scan_subfolders)
         if path.is_file() and path.name.lower() == candidate.name.lower()
     ]
     if len(matches) == 1:
@@ -116,16 +133,24 @@ def iter_source_files(
     scan_subfolders: bool,
     extensions: set[str] = SUPPORTED_EXTENSIONS,
 ) -> list[Path]:
-    pattern = "**/*" if scan_subfolders else "*"
     files = []
-    for path in source_dir.glob(pattern):
-        if not path.is_file():
-            continue
-        if output_dir and output_dir in path.parents:
-            continue
-        if not is_supported_conversion_type(path, extensions):
-            continue
-        files.append(path)
+    for directory, subdirectories, filenames in os.walk(source_dir):
+        parent = Path(directory)
+        # Prune generated output, repository metadata, dependencies, and caches
+        # before descending. os.walk does not follow directory symlinks.
+        subdirectories[:] = [
+            name for name in subdirectories
+            if name.lower() not in EXCLUDED_DIRECTORY_NAMES
+            and (output_dir is None or (parent / name).resolve() != output_dir)
+        ]
+        for name in filenames:
+            path = parent / name
+            if output_dir and output_dir in path.parents:
+                continue
+            if is_supported_conversion_type(path, extensions):
+                files.append(path)
+        if not scan_subfolders:
+            break
     return sorted(files, key=lambda item: str(item).lower())
 
 
@@ -546,7 +571,7 @@ def output_path_for_file(
     output_dir: Path | None,
 ) -> Path:
     if output_dir is None:
-        return path.with_name(markdown_filename(path))
+        return path.parent / MARKDOWN_FOLDER / markdown_filename(path)
 
     try:
         relative_parent = path.parent.relative_to(source_dir)
@@ -625,7 +650,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         metavar="PATH",
-        help="Output folder. Default: beside each source file.",
+        help="Shared output folder. Default: a markdown subfolder in each source directory.",
     )
     parser.add_argument(
         "--f",

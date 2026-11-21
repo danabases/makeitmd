@@ -74,7 +74,9 @@ Windows (PowerShell):
 .\.venv\Scripts\python.exe convert_files_to_markdown.py ./documents
 ```
 
-Add `--o` to write into a separate folder, or `--f` to convert one file. For example, on Windows:
+The default command creates a `markdown` subfolder in each scanned directory that has files to convert. Rerun the same command to convert new files and refresh outputs whose sources are newer.
+
+Add `--o` to collect outputs in one separate folder instead, or `--f` to convert one file. For example, on Windows:
 
 ```powershell
 .\.venv\Scripts\python.exe convert_files_to_markdown.py ./documents --o ./markdown
@@ -88,7 +90,7 @@ On macOS or Linux, replace `.\.venv\Scripts\python.exe` in the examples with `./
 | Switch | Effect |
 | --- | --- |
 | `SOURCE` | Folder to scan. Required. |
-| `--o PATH` | Write Markdown to a separate folder. Default: beside each source file. |
+| `--o PATH` | Collect Markdown in one output folder, mirroring source subdirectories. Default: a `markdown` subfolder in each source directory. |
 | `--f FILE` | Convert one file by filename or path. Use an absolute path if a relative path is ambiguous. |
 | `--t pdf docx` | Convert only the listed file types. |
 | `--top` | Scan only files directly in `SOURCE`. |
@@ -98,7 +100,34 @@ On macOS or Linux, replace `.\.venv\Scripts\python.exe` in the examples with `./
 
 ## Output
 
-By default, Markdown is written beside each source file. With `--o`, the script mirrors the source folder structure in the output folder.
+By default, each directory stores converted copies of its immediate files in its own `markdown` subfolder:
+
+```text
+documents/
+  report.pdf
+  markdown/
+    report.pdf.md
+  project/
+    notes.txt
+    markdown/
+      notes.txt.md
+    archive/
+      email.eml
+      markdown/
+        email.eml.md
+```
+
+Existing Markdown source files are ignored. Folders named `markdown` (case insensitive) are reserved for generated output and excluded from recursive scans, including any other files inside them. Output folders are created only when a conversion succeeds. Unsupported file types are not converted; the supported extensions are listed above.
+
+Repository scans also exclude these directory names at every depth (case insensitive), including when resolving `--f` within the source tree:
+
+- Metadata and agent configuration: `.git`, `.codex`, `.agents`, `.hg`, `.svn`.
+- Dependencies and environments: `.venv`, `venv`, `node_modules`, `.tox`, `.nox`.
+- Caches: `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`.
+
+Directory symlinks are not followed. Git ignore rules are not automatically applied: ignored folders may contain documents you intend to convert. Review project-specific folders such as `build`, `dist`, `vendor`, `.next`, `.nuxt`, `coverage`, and `.cache`; add names to `EXCLUDED_DIRECTORY_NAMES` near the top of the script if they contain only generated or third-party files.
+
+With `--o`, the script instead mirrors the source folder structure in the single output folder.
 
 The output name keeps the full source filename and adds `.md`. For example, `Meeting Notes.docx` becomes `Meeting Notes.docx.md`.
 
